@@ -1,28 +1,28 @@
-
-# coding: utf-8
-
-# # German Traffic Sign Classification
-# 
-# ---
-
-# In[1]:
-
-#get_ipython().magic(u'matplotlib inline')
-
 import numpy as np
 import matplotlib
 from matplotlib import pyplot
 import tensorflow as tf
-
-
-# ---
-# 
-# ## Dataset
-
-# In[2]:
-
+import sys
+import time
+from sklearn.utils import shuffle
+from skimage import exposure
+from nolearn.lasagne import BatchIterator
+from skimage.transform import rotate
+from skimage.transform import warp
+from skimage.transform import ProjectiveTransform
+import warnings 
+import matplotlib.gridspec as gridspec
+from skimage import io
+import os
+from cloudlog import CloudLog
+import json
+import random
+from sklearn.cross_validation import train_test_split
 import pickle
+from collections import namedtuple
+from pandas.io.parsers import read_csv
 
+# load picked python data from disk
 def load_pickled_data(file, columns):
     """
     Loads pickled training and test data.
@@ -44,9 +44,7 @@ def load_pickled_data(file, columns):
     return tuple(map(lambda c: dataset[c], columns))
 
 
-# In[3]:
-
-from pandas.io.parsers import read_csv
+# load training dataset from disk
 
 print("Starting")
 
@@ -73,51 +71,8 @@ print("Number of testing examples =", n_test)
 print("Image data shape =", image_shape)
 print("Number of classes =", n_classes)
 
-
-# Let's check out the sign samples. We will go through all dataset classes, noting number of samples and plotting 10 random images representing each class.
-
-# In[35]:
-
-import random
-
 col_width = max(len(name) for name in signnames)
 
-#for c, c_index, c_count in zip(sign_classes, class_indices, class_counts):
-#    print("Class %i: %-*s  %s samples" % (c, col_width, signnames[c], str(c_count)))
-#    fig = pyplot.figure(figsize = (6, 1))
-#    fig.subplots_adjust(left = 0, right = 1, bottom = 0, top = 1, hspace = 0.05, wspace = 0.05)
-#    random_indices = random.sample(range(c_index, c_index + c_count), 10)
-#    for i in range(10):
-#        axis = fig.add_subplot(1, 10, i + 1, xticks=[], yticks=[])
-#        axis.imshow(X_train[random_indices[i]])
-#    pyplot.show()
-#    print("--------------------------------------------------------------------------------------\n")
-#    
-#pyplot.bar( np.arange( 43 ), class_counts, align='center' )
-#pyplot.xlabel('Class')
-#pyplot.ylabel('Number of training examples')
-#pyplot.xlim([-1, 43])
-#pyplot.show()
-#
-
-# Some classes are highly underrepresented. Overall amount of data is disappointing: some classes have as little as 210 samples, this won't be enough for most of the models to generalise well.
-# 
-# Images with some signs are horizontally and/or vertically symmetrical (like **Bumpy road** or **Ahead only**), and can be simply flipped, thus allowing us to get twice as much data for these classes. 
-# 
-# Other signs come in kind of interchageable pairs, like **Keep right** and **Keep left**: those signs can be flipped and assigned to a paired class. In some cases (like **Keep right** and **Keep left**) we increase the number of samples for **Keep left** from 300 to 2370!
-# 
-# CNNs have built-in invariance to small translations, scaling and rotations. The training set doesn't seem to contain those deformations, so we will add those in our data augmentation step as well.
-
-# ----
-# 
-# ## Model Architecture
-
-# Some useful logging routines.
-
-# In[4]:
-
-import sys
-import time
 
 def get_time_hhmmss(start = None):
     """
@@ -155,14 +110,6 @@ def print_progress(iteration, total):
         sys.stdout.write('\n')
     sys.stdout.flush()
 
-
-# Preprocessing routines.
-
-# In[5]:
-
-from sklearn.utils import shuffle
-from skimage import exposure
-import warnings 
 
 num_classes = 43
 
@@ -228,16 +175,6 @@ def load_and_process_data(pickled_data_file):
 
 
 # Data augmentation.
-
-# In[ ]:
-
-from nolearn.lasagne import BatchIterator
-from skimage.transform import rotate
-from skimage.transform import warp
-from skimage.transform import ProjectiveTransform
-import random
-
-import time
 current_milli_time = lambda: int(round(time.time() * 1000))
 
 class AugmentedSignsBatchIterator(BatchIterator):
@@ -354,10 +291,6 @@ class AugmentedSignsBatchIterator(BatchIterator):
         return Xb
 
 
-# Let's test data augmentation by plotting first 5 examples next to the original images (original image is on the left).
-
-# In[22]:
-
 X_train, y_train = load_pickled_data("traffic-signs-data/train.p", columns = ['features', 'labels'])
 
 X_train = X_train[0:1000]
@@ -366,21 +299,6 @@ y_train = y_train[0:1000]
 X_train = X_train / 255.
 
 batch_iterator = AugmentedSignsBatchIterator(batch_size = 5, p = 1.0, intensity = 0.75)
-#for x_batch, y_batch in batch_iterator(X_train, y_train):
-#    for i in range(5): 
-#        # plot two images:
-#        fig = pyplot.figure(figsize=(3, 1))
-#        axis = fig.add_subplot(1, 2, 1, xticks=[], yticks=[])
-#        axis.imshow(X_train[i])
-#        axis = fig.add_subplot(1, 2, 2, xticks=[], yticks=[])
-#        axis.imshow(x_batch[i])
-#        pyplot.show()
-#    break
-
-
-# A couple of functions for preprocessing our dataset. We may only need to call them once, then pickle resulting balanced dataset and keep using that pickle from then on.
-
-# In[7]:
 
 def flip_extend(X, y):
     """
@@ -510,12 +428,6 @@ def extend_balancing_classes(X, y, aug_intensity = 0.5, counts = None):
     return ((X_extended * 255.).astype(np.uint8), y_extended)
 
 
-# Struct to organise some of the model parameters.
-
-# In[6]:
-
-from collections import namedtuple
-
 Parameters = namedtuple('Parameters', [
         # Data parameters
         'num_classes', 'image_size', 
@@ -533,12 +445,6 @@ Parameters = namedtuple('Parameters', [
         'fc4_size', 'fc4_p'
     ])
 
-
-# General routine for managing model paths, scopes and identifiers.
-
-# In[7]:
-
-import os
 
 class Paths(object):
     """
@@ -640,10 +546,6 @@ class Paths(object):
         return self.root_path + "learning_curves.png"
 
 
-# Early stopping.
-
-# In[8]:
-
 class EarlyStopping(object):
     """
     Provides early stopping functionality. Keeps track of model accuracy, 
@@ -710,12 +612,6 @@ class EarlyStopping(object):
         return False
 
 
-# Logger to keep track of the training even if no browser is connected to kernel.
-
-# In[9]:
-
-from cloudlog import CloudLog
-
 class ModelCloudLog(CloudLog):
         
     def log_parameters(self, params, train_size, valid_size, test_size):
@@ -757,16 +653,6 @@ class ModelCloudLog(CloudLog):
         self("          Early stopping: " + ("Enabled (patience = {})".format(params.early_stopping_patience) if params.early_stopping_enabled else "Disabled"))
         self(" Keep training old model: " + ("Enabled" if params.resume_training else "Disabled")) 
 
-
-# **Model architecture**
-# 
-# I used a fairly simple model of 3 convolutional layers and 1 fully connected layer (with every convolutional and fully connected layer being followed by a ReLU non-linearity):
-# 
-# ![Model](model_architecture.png)
-# 
-# As per Pierre Sermanet paper, I have provided output of every convolutional layer to the classifier, applying additional pooling to each of the convolutinal outputs, so that they are proportionally downsampled.
-
-# In[10]:
 
 def fully_connected(input, size):
     """
@@ -874,59 +760,8 @@ def model_pass(input, params, is_training):
     return logits
 
 
-# Plotting learning curves.
-
-# In[11]:
-
-def plot_curve(axis, params, train_column, valid_column, linewidth = 2, train_linestyle = "b-", valid_linestyle = "g-"):
-    """
-    Plots a pair of validation and training curves on a single plot.
-    """
-    model_history = np.load(Paths(params).train_history_path + ".npz")
-    train_values = model_history[train_column]
-    valid_values = model_history[valid_column]
-    epochs = train_values.shape[0]
-    x_axis = np.arange(epochs)
-    axis.plot(x_axis[train_values > 0], train_values[train_values > 0], train_linestyle, linewidth=linewidth, label="train")
-    axis.plot(x_axis[valid_values > 0], valid_values[valid_values > 0], valid_linestyle, linewidth=linewidth, label="valid")
-    return epochs
-
-# Plots history of learning curves for a specific model.
-def plot_learning_curves(params):
-    """
-    Plots learning curves (loss and accuracy on both training and validation sets) for a model identified by a parameters struct.
-    """
-    curves_figure = pyplot.figure(figsize = (10, 4))
-    axis = curves_figure.add_subplot(1, 2, 1)
-    epochs_plotted = plot_curve(axis, parameters, train_column = "train_accuracy_history", valid_column = "valid_accuracy_history")
-
-    pyplot.grid()
-    pyplot.legend()
-    pyplot.xlabel("epoch")
-    pyplot.ylabel("accuracy")
-    pyplot.ylim(50., 115.)
-    pyplot.xlim(0, epochs_plotted)
-
-    axis = curves_figure.add_subplot(1, 2, 2)
-    epochs_plotted = plot_curve(axis, parameters, train_column = "train_loss_history", valid_column = "valid_loss_history")
-
-    pyplot.grid()
-    pyplot.legend()
-    pyplot.xlabel("epoch")
-    pyplot.ylabel("loss")
-    pyplot.ylim(0.0001, 10.)
-    pyplot.xlim(0, epochs_plotted)
-    pyplot.yscale("log")
-
-
-# ---
-# 
 # ## Training
-# 
 # The actual method to perform model training. Calling this function would trigger the training process.
-
-# In[12]:
-
 def train_model(params, X_train, y_train, X_valid, y_valid, X_test, y_test):
 #$, logger_config):
     """
@@ -1061,8 +896,12 @@ def train_model(params, X_train, y_train, X_valid, y_valid, X_test, y_test):
                         is_training : True
                     }
                 )
-                print("TF batch learning elapsed: ", current_milli_time() - time1)
-                print("TF batch shape: ", x_batch.shape)
+
+                size_minibatch_mb = x_batch.shape[0] * x_batch.shape[1] * x_batch.shape[2] * 3 / \
+                                    2**20;
+                elapsed_ms = current_milli_time() - time1;
+                print("TF batch shape: ", x_batch.shape, " elapsed (ms): ", current_milli_time,
+                        " BW (MB/s): ", size_minibatch_mb / elapsed_ms * 1000)
 
             # If another significant epoch ended, we log our losses.
             if (epoch % params.log_epoch == 0):
@@ -1124,15 +963,7 @@ def train_model(params, X_train, y_train, X_valid, y_valid, X_test, y_test):
         pyplot.show()
 
 
-# Here we preprocess the whole dataset first. We first flip some of the images which classes allow that, and then prepare two versions of the training dataset: extended and balanced. Extended one has the same distribution of examples across classes, but has 20x more augmented data. Balanced contains examples equally balanced across classes. In both cases we don't simply copy the images — we apply augmentation, so that every time we duplicate the data it's slightly different.
-
 # Prepare extended and balanced training datasets by augmenting original data:
-
-# In[ ]:
-
-import random
-import pickle
-from sklearn.cross_validation import train_test_split
 
 train_dataset_file = "traffic-signs-data/train.p"
 test_dataset_file = "traffic-signs-data/test.p"
@@ -1175,10 +1006,6 @@ print("Extended dataset saved in", train_extended_dataset_file)
 
 # Preprocess all datasets:
 
-# In[ ]:
-
-import pickle
-
 train_extended_dataset_file = "traffic-signs-data/train_extended.p"
 train_balanced_dataset_file = "traffic-signs-data/train_balanced.p"
 train_extended_preprocessed_dataset_file = "traffic-signs-data/train_extended_preprocessed.p"
@@ -1211,13 +1038,6 @@ print("Preprocessed extended testing dataset saved in", test_preprocessed_datase
 
 
 # Specify model hyperparameters and perform training.
-
-# In[328]:
-
-import pickle
-import json
-from sklearn.model_selection import train_test_split
-
 train_extended_preprocessed_dataset_file = "traffic-signs-data/train_extended_preprocessed.p"
 train_balanced_preprocessed_dataset_file = "traffic-signs-data/train_balanced_preprocessed.p"
 test_preprocessed_dataset_file = "traffic-signs-data/test_preprocessed.p"
@@ -1254,14 +1074,6 @@ X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_siz
 X_test, y_test = load_pickled_data(test_preprocessed_dataset_file, columns = ['features', 'labels'])
 train_model(parameters, X_train, y_train, X_valid, y_valid, X_test, y_test)#, logger_config)
 
-
-# ---
-# 
-# ## Evaluation
-# 
-# The accuracy of **99.33%** means that there were **85 images** in the test set that this model failed to classify correctly — let's take a look at those 85 images.
-
-# In[27]:
 
 def get_top_k_predictions(params, X, k = 5):
     """
@@ -1307,47 +1119,12 @@ def get_top_k_predictions(params, X, k = 5):
         return np.array(p)
 
 
-# In[28]:
-
 X_test, y_test = load_pickled_data(test_preprocessed_dataset_file, columns = ['features', 'labels'])
 X_original, _ = load_pickled_data(test_dataset_file, columns = ['features', 'labels'])
 predictions = get_top_k_predictions(parameters, X_test)
 
 predictions = predictions[1][:, np.argmax(predictions[0], 1)][:, 0].astype(int)
 labels = np.argmax(y_test, 1)
-
-###print("Original:")
-###incorrectly_predicted = X_original[predictions != labels]
-###fig = pyplot.figure(figsize=(6, 6))
-###fig.subplots_adjust(left=0, right=1, bottom=0, top=1, hspace=0.05, wspace=0.05)
-###for i in range(incorrectly_predicted.shape[0]):
-###    ax = fig.add_subplot(10, 10, i + 1, xticks=[], yticks=[])
-###    ax.imshow(incorrectly_predicted[i])
-###pyplot.show()
-###
-###print("Preprocessed:")
-###incorrectly_predicted = X_test[predictions != labels]
-###fig = pyplot.figure(figsize=(6, 6))
-###fig.subplots_adjust(left=0, right=1, bottom=0, top=1, hspace=0.05, wspace=0.05)
-###for i in range(incorrectly_predicted.shape[0]):
-###    ax = fig.add_subplot(10, 10, i + 1, xticks=[], yticks=[])
-###    ax.imshow(incorrectly_predicted[i].reshape(32, 32), cmap='gray')
-###pyplot.show()
-
-
-# Looks like most of them had artefacts like sunlight or obstructing objects, or didn't have enough data for in the training set. This is one of the issues of training the model on unbalanced data: probably those **100** and **60** signs were incorrectly classified as **80**, as we had significantly more data for those after flipping.
-
-# ---
-# 
-# ### Test a Model on New Images
-
-# Try out trained model on manually captured images (in Google Maps). You can find them in `traffic-signs-data/custom/`.
-
-# In[41]:
-
-import matplotlib.gridspec as gridspec
-from skimage import io
-import os
 
 def plot_image_statistics(predictions, index):
     """
@@ -1468,8 +1245,6 @@ X_custom, _ = preprocess_dataset(X_custom)
 predictions = get_top_k_predictions(parameters, X_custom)
 
 
-# In[45]:
-
 # For every example plot original image, preprocessed image, and model predictions.
 for i in range(38):
     print("Actual class: ", signnames[y_custom[i]] if y_custom[i] != 99 else "None")
@@ -1477,17 +1252,6 @@ for i in range(38):
     print("---------------------------------------------------------------------------------------------------\n")
 
 
-# Surprisingly, the model was quite sure about some of the false predictions. My best guesses are:
-# * These last two signs look fairly different from the German ones. 
-# * First training stage was carried out on a **extended** dataset and not **balanced** one, the model became biased towards predicting overrepresented classes — such as **Priority road**.
-# 
-# Unfortunately this model kind of overfits the supplied test data (although I didn't use it while training, of course), as my main goal was to **get highest score** on the supplied testing set. If I were to implement the model that should **perform best on arbitrary captured dataset**, I would only train it on class-balanced data, where all classes were equally represented. However, since the goal was to get highest test set accuracy, it may be overfitting it a bit.
-# 
-# I am confident I could improve performance of this model even further with a couple of other interesting ideas I had, but I'm already a couple of days late with the submission due date, so I decided to call it a day.
-
-# In[40]:
-
-# Remove examples of unseen classes, like "Elderly Crossing" and preprocess y:
 X_custom = X_custom[y_custom < 99]
 y_custom = y_custom[y_custom < 99]
 y_custom = np.eye(43)[y_custom]
@@ -1496,5 +1260,3 @@ predictions = get_predictions(parameters, X_custom)[1][:, 0]
 accuracy = 100.0 * np.sum(predictions == np.argmax(y_custom, 1)) / predictions.shape[0]
 print("Accuracy on captured images: %.2f%%" % (accuracy)) 
 
-
-# Accuracy on the captured images was **82.86%** for this model. It could be higher if I only used German-looking signs — however as indicated earlier I used a mixture of UK and non-EU signs, some of them looked fairly different from the German ones, hence the low accuracy.
