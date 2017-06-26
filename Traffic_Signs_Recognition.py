@@ -1,26 +1,25 @@
 import numpy as np
-import matplotlib
 from matplotlib import pyplot
-import tensorflow as tf
-import sys
-import time
+import matplotlib.gridspec as gridspec
 from sklearn.utils import shuffle
+from sklearn.cross_validation import train_test_split
 from skimage import exposure
-from nolearn.lasagne import BatchIterator
 from skimage.transform import rotate
 from skimage.transform import warp
 from skimage.transform import ProjectiveTransform
-import warnings 
-import matplotlib.gridspec as gridspec
 from skimage import io
-import os
 from cloudlog import CloudLog
-import json
-import random
-from sklearn.cross_validation import train_test_split
-import pickle
+from nolearn.lasagne import BatchIterator
 from collections import namedtuple
 from pandas.io.parsers import read_csv
+import tensorflow as tf
+import warnings 
+import sys
+import time
+import os
+import json
+import random
+import pickle
 
 # load picked python data from disk
 def load_pickled_data(file, columns):
@@ -44,8 +43,7 @@ def load_pickled_data(file, columns):
     return tuple(map(lambda c: dataset[c], columns))
 
 
-# load training dataset from disk
-
+# 1. load training dataset from disk and print some info
 print("Starting")
 
 signnames = read_csv("signnames.csv").values[:, 1]
@@ -291,6 +289,7 @@ class AugmentedSignsBatchIterator(BatchIterator):
         return Xb
 
 
+#2. Load training dataset again and create batch iterator
 X_train, y_train = load_pickled_data("traffic-signs-data/train.p", columns = ['features', 'labels'])
 
 X_train = X_train[0:1000]
@@ -428,6 +427,7 @@ def extend_balancing_classes(X, y, aug_intensity = 0.5, counts = None):
     return ((X_extended * 255.).astype(np.uint8), y_extended)
 
 
+# 3. Create some parameters
 Parameters = namedtuple('Parameters', [
         # Data parameters
         'num_classes', 'image_size', 
@@ -963,8 +963,7 @@ def train_model(params, X_train, y_train, X_valid, y_valid, X_test, y_test):
         pyplot.show()
 
 
-# Prepare extended and balanced training datasets by augmenting original data:
-
+# 4. Load training dataset yet again
 train_dataset_file = "traffic-signs-data/train.p"
 test_dataset_file = "traffic-signs-data/test.p"
 train_extended_dataset_file = "traffic-signs-data/train_extended.p"
@@ -976,18 +975,21 @@ y_train = y_train[0:1000]
 
 print("Number of training examples in initial dataset =", X_train.shape[0])
 _, class_counts = np.unique(y_train, return_counts = True)
+
+# 5. Extend dataset by flipping
 X_train, y_train = flip_extend(X_train, y_train)
 print("Number of training examples after horizontal flipping =", X_train.shape[0])
 
 print ("extend_balancing_classes")
 
-# Prepare a dataset with balanced classes
+# 6. Prepare a dataset with balanced classes
 X_train_balanced, y_train_balanced = extend_balancing_classes(X_train, y_train, aug_intensity = 0.75, counts = np.full(43, 1000, dtype = int))
 #X_train_balanced, y_train_balanced = extend_balancing_classes(X_train, y_train, aug_intensity = 0.75, counts = np.full(43, 20000, dtype = int))
 print("Number of training examples after augmenting and balancing training data =", X_train_balanced.shape[0])
 
 #raise
 
+# 7. dump extended dataset into file
 pickle.dump({
         "features" : X_train_balanced,
         "labels" : y_train_balanced
@@ -995,6 +997,7 @@ pickle.dump({
 print("Balanced dataset saved in", train_balanced_dataset_file)
 
 # Prepare a dataset with extended classes
+# 8. extend once more
 X_train_extended, y_train_extended = extend_balancing_classes(X_train, y_train, aug_intensity = 0.75, counts = class_counts * 20)
 print("Number of training examples after augmenting and extending training data =", X_train_extended.shape[0])
 pickle.dump({
@@ -1004,8 +1007,7 @@ pickle.dump({
 print("Extended dataset saved in", train_extended_dataset_file)
 
 
-# Preprocess all datasets:
-
+# 9. Preprocess all datasets (?????)
 train_extended_dataset_file = "traffic-signs-data/train_extended.p"
 train_balanced_dataset_file = "traffic-signs-data/train_balanced.p"
 train_extended_preprocessed_dataset_file = "traffic-signs-data/train_extended_preprocessed.p"
@@ -1037,6 +1039,7 @@ pickle.dump({
 print("Preprocessed extended testing dataset saved in", test_preprocessed_dataset_file)
 
 
+# 10. define parameters
 # Specify model hyperparameters and perform training.
 train_extended_preprocessed_dataset_file = "traffic-signs-data/train_extended_preprocessed.p"
 train_balanced_preprocessed_dataset_file = "traffic-signs-data/train_balanced_preprocessed.p"
@@ -1069,194 +1072,197 @@ parameters = Parameters(
     fc4_size = 1024, fc4_p = 0.5
 )
 
+# 11. Train model
 X_train, y_train = load_pickled_data(train_balanced_preprocessed_dataset_file, columns = ['features', 'labels'])
 X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_size = 0.25)
 X_test, y_test = load_pickled_data(test_preprocessed_dataset_file, columns = ['features', 'labels'])
 train_model(parameters, X_train, y_train, X_valid, y_valid, X_test, y_test)#, logger_config)
 
 
-def get_top_k_predictions(params, X, k = 5):
-    """
-    Evaluates `X` on a model defined by `params` and returns top 5 predictions.
 
-    Parameters
-    ----------
-    params    : Parameters
-                Structure (`namedtuple`) containing model parameters.
-    X         : 
-                Testing dataset. 
-    k         : 
-                Number of top predictions we are interested in.
-                
-    Returns
-    -------
-    An array of top k softmax predictions for each example.
-    """
-
-    print("get_top_k_predictions")
-    
-    # Initialisation routines: generate variable scope, create logger, note start time.
-    paths = Paths(params)
-    
-    # Build the graph
-    graph = tf.Graph()
-    with graph.as_default():
-        # Input data. For the training data, we use a placeholder that will be fed at run time with a training minibatch.
-        tf_x = tf.placeholder(tf.float32, shape = (None, params.image_size[0], params.image_size[1], 1))
-        is_training = tf.constant(False)
-        with tf.variable_scope(paths.var_scope):
-            predictions = tf.nn.softmax(model_pass(tf_x, params, is_training))
-            top_k_predictions = tf.nn.top_k(predictions, k)
-
-    with tf.Session(graph = graph) as session:
-        session.run(tf.global_variables_initializer())
-        print("tf.train.Saver().restore(session, paths.model_path)")
-        tf.train.Saver().restore(session, paths.model_path)
-        [p] = session.run([top_k_predictions], feed_dict = {
-                tf_x : X
-            }
-        )
-        return np.array(p)
-
-
-X_test, y_test = load_pickled_data(test_preprocessed_dataset_file, columns = ['features', 'labels'])
-X_original, _ = load_pickled_data(test_dataset_file, columns = ['features', 'labels'])
-predictions = get_top_k_predictions(parameters, X_test)
-
-predictions = predictions[1][:, np.argmax(predictions[0], 1)][:, 0].astype(int)
-labels = np.argmax(y_test, 1)
-
-def plot_image_statistics(predictions, index):
-    """
-    Plots prediction statistics for a single example.
-
-    Parameters
-    ----------
-    predictions   : 
-                    Array of predictions.
-    index         : 
-                    Index of the example we need to plot statistics for
-    """
-    # Prepare original and preprocessed images
-    original = io.imread(os.getcwd() + '/traffic-signs-data/custom/' + "example_{0:0>5}".format(index + 1) + '.png')
-    preprocessed = X_custom[index].reshape(32, 32)
-        
-    # Prepare the grid
-    pyplot.figure(figsize = (6, 2))
-    gridspec.GridSpec(2, 2)
-    
-    # Plot original image
-    pyplot.subplot2grid((2, 2), (0, 0), colspan=1, rowspan=1)
-    pyplot.imshow(original)
-    pyplot.axis('off')
-
-    # Plot preprocessed image
-    pyplot.subplot2grid((2, 2), (1, 0), colspan=1, rowspan=1)
-    pyplot.imshow(preprocessed, cmap='gray')
-    pyplot.axis('off')
-
-    # Plot predictions
-    pyplot.subplot2grid((2, 2), (0, 1), colspan=1, rowspan=2)
-    pyplot.barh(np.arange(5)+.5, predictions[0][index], align='center')
-    pyplot.yticks(np.arange(5)+.5, signnames[predictions[1][index].astype(int)])
-    pyplot.tick_params(axis='both', which='both', labelleft='off', labelright='on', labeltop='off', labelbottom='off')
-    
-    pyplot.show()
-
-
-train_extended_preprocessed_dataset_file = "traffic-signs-data/train_extended_preprocessed.p"
-train_balanced_preprocessed_dataset_file = "traffic-signs-data/train_balanced_preprocessed.p"
-test_preprocessed_dataset_file = "traffic-signs-data/test_preprocessed.p"
-
-parameters = Parameters(
-    # Data parameters
-    num_classes = 43,
-    image_size = (32, 32),
-    # Training parameters
-    batch_size = 256,
-    max_epochs = 1001,
-    log_epoch = 1,
-    print_epoch = 1,
-    # Optimisations
-    learning_rate_decay = False,
-    learning_rate = 0.0001,
-    l2_reg_enabled = True,
-    l2_lambda = 0.0001,
-    early_stopping_enabled = True,
-    early_stopping_patience = 100,
-    resume_training = True,
-    # Layers architecture
-    conv1_k = 5, conv1_d = 32, conv1_p = 0.9,
-    conv2_k = 5, conv2_d = 64, conv2_p = 0.8,
-    conv3_k = 5, conv3_d = 128, conv3_p = 0.7,
-    fc4_size = 1024, fc4_p = 0.5
-)
-    
-# Load images from .png files to `X_custom` NumPy array
-X_custom = np.empty([0, 32, 32, 3], dtype = np.int32)
-for i in range(38):
-    image = io.imread(os.getcwd() + '/traffic-signs-data/custom/' + "example_{0:0>5}".format(i + 1) + '.png')
-    X_custom = np.append(X_custom, [image[:, :, :3]], axis = 0)
-
-# Provide labels of the captured images:
-y_custom = np.array([
-    21, # "example_00001"
-    39, # "example_00002"
-    17, # "example_00003"
-    17, # "example_00004"
-    17, # "example_00005"
-    39, # "example_00006"
-    39, # "example_00007"
-    40, # "example_00008"
-    40, # "example_00009"
-    34, # "example_00010"
-    28, # "example_00011"
-    39, # "example_00012"
-    0, # "example_00013"
-    17, # "example_00014"
-    38, # "example_00015"
-    13, # "example_00016"
-    40, # "example_00017"
-    13, # "example_00018"
-    38, # "example_00019"
-    38, # "example_00020"
-    11, # "example_00021"
-    0, # "example_00022"
-    28, # "example_00023"
-    0, # "example_00024"
-    99, # "example_00025"
-    99, # "example_00026"
-    99, # "example_00027"
-    32, # "example_00028"
-    40, # "example_00029"
-    28, # "example_00030"
-    40, # "example_00031"
-    40, # "example_00032"
-    28, # "example_00033"
-    24, # "example_00034"
-    0, # "example_00035"
-    0, # "example_00036"
-    0, # "example_00037"
-    0 # "example_00038"
-])
-
-# Preprocess and get predictions based on the current model
-X_custom, _ = preprocess_dataset(X_custom)
-predictions = get_top_k_predictions(parameters, X_custom)
-
-
-# For every example plot original image, preprocessed image, and model predictions.
-for i in range(38):
-    print("Actual class: ", signnames[y_custom[i]] if y_custom[i] != 99 else "None")
-    plot_image_statistics(predictions, i)
-    print("---------------------------------------------------------------------------------------------------\n")
-
-
-X_custom = X_custom[y_custom < 99]
-y_custom = y_custom[y_custom < 99]
-y_custom = np.eye(43)[y_custom]
-
-predictions = get_predictions(parameters, X_custom)[1][:, 0]
-accuracy = 100.0 * np.sum(predictions == np.argmax(y_custom, 1)) / predictions.shape[0]
-print("Accuracy on captured images: %.2f%%" % (accuracy)) 
-
+# 12----X from here down we dont care ?
+####def get_top_k_predictions(params, X, k = 5):
+####    """
+####    Evaluates `X` on a model defined by `params` and returns top 5 predictions.
+####
+####    Parameters
+####    ----------
+####    params    : Parameters
+####                Structure (`namedtuple`) containing model parameters.
+####    X         : 
+####                Testing dataset. 
+####    k         : 
+####                Number of top predictions we are interested in.
+####                
+####    Returns
+####    -------
+####    An array of top k softmax predictions for each example.
+####    """
+####
+####    print("get_top_k_predictions")
+####    
+####    # Initialisation routines: generate variable scope, create logger, note start time.
+####    paths = Paths(params)
+####    
+####    # Build the graph
+####    graph = tf.Graph()
+####    with graph.as_default():
+####        # Input data. For the training data, we use a placeholder that will be fed at run time with a training minibatch.
+####        tf_x = tf.placeholder(tf.float32, shape = (None, params.image_size[0], params.image_size[1], 1))
+####        is_training = tf.constant(False)
+####        with tf.variable_scope(paths.var_scope):
+####            predictions = tf.nn.softmax(model_pass(tf_x, params, is_training))
+####            top_k_predictions = tf.nn.top_k(predictions, k)
+####
+####    with tf.Session(graph = graph) as session:
+####        session.run(tf.global_variables_initializer())
+####        print("tf.train.Saver().restore(session, paths.model_path)")
+####        tf.train.Saver().restore(session, paths.model_path)
+####        [p] = session.run([top_k_predictions], feed_dict = {
+####                tf_x : X
+####            }
+####        )
+####        return np.array(p)
+####
+####
+####X_test, y_test = load_pickled_data(test_preprocessed_dataset_file, columns = ['features', 'labels'])
+####X_original, _ = load_pickled_data(test_dataset_file, columns = ['features', 'labels'])
+####predictions = get_top_k_predictions(parameters, X_test)
+####
+####predictions = predictions[1][:, np.argmax(predictions[0], 1)][:, 0].astype(int)
+####labels = np.argmax(y_test, 1)
+####
+####def plot_image_statistics(predictions, index):
+####    """
+####    Plots prediction statistics for a single example.
+####
+####    Parameters
+####    ----------
+####    predictions   : 
+####                    Array of predictions.
+####    index         : 
+####                    Index of the example we need to plot statistics for
+####    """
+####    # Prepare original and preprocessed images
+####    original = io.imread(os.getcwd() + '/traffic-signs-data/custom/' + "example_{0:0>5}".format(index + 1) + '.png')
+####    preprocessed = X_custom[index].reshape(32, 32)
+####        
+####    # Prepare the grid
+####    pyplot.figure(figsize = (6, 2))
+####    gridspec.GridSpec(2, 2)
+####    
+####    # Plot original image
+####    pyplot.subplot2grid((2, 2), (0, 0), colspan=1, rowspan=1)
+####    pyplot.imshow(original)
+####    pyplot.axis('off')
+####
+####    # Plot preprocessed image
+####    pyplot.subplot2grid((2, 2), (1, 0), colspan=1, rowspan=1)
+####    pyplot.imshow(preprocessed, cmap='gray')
+####    pyplot.axis('off')
+####
+####    # Plot predictions
+####    pyplot.subplot2grid((2, 2), (0, 1), colspan=1, rowspan=2)
+####    pyplot.barh(np.arange(5)+.5, predictions[0][index], align='center')
+####    pyplot.yticks(np.arange(5)+.5, signnames[predictions[1][index].astype(int)])
+####    pyplot.tick_params(axis='both', which='both', labelleft='off', labelright='on', labeltop='off', labelbottom='off')
+####    
+####    pyplot.show()
+####
+####
+####train_extended_preprocessed_dataset_file = "traffic-signs-data/train_extended_preprocessed.p"
+####train_balanced_preprocessed_dataset_file = "traffic-signs-data/train_balanced_preprocessed.p"
+####test_preprocessed_dataset_file = "traffic-signs-data/test_preprocessed.p"
+####
+####parameters = Parameters(
+####    # Data parameters
+####    num_classes = 43,
+####    image_size = (32, 32),
+####    # Training parameters
+####    batch_size = 256,
+####    max_epochs = 1001,
+####    log_epoch = 1,
+####    print_epoch = 1,
+####    # Optimisations
+####    learning_rate_decay = False,
+####    learning_rate = 0.0001,
+####    l2_reg_enabled = True,
+####    l2_lambda = 0.0001,
+####    early_stopping_enabled = True,
+####    early_stopping_patience = 100,
+####    resume_training = True,
+####    # Layers architecture
+####    conv1_k = 5, conv1_d = 32, conv1_p = 0.9,
+####    conv2_k = 5, conv2_d = 64, conv2_p = 0.8,
+####    conv3_k = 5, conv3_d = 128, conv3_p = 0.7,
+####    fc4_size = 1024, fc4_p = 0.5
+####)
+####    
+##### Load images from .png files to `X_custom` NumPy array
+####X_custom = np.empty([0, 32, 32, 3], dtype = np.int32)
+####for i in range(38):
+####    image = io.imread(os.getcwd() + '/traffic-signs-data/custom/' + "example_{0:0>5}".format(i + 1) + '.png')
+####    X_custom = np.append(X_custom, [image[:, :, :3]], axis = 0)
+####
+##### Provide labels of the captured images:
+####y_custom = np.array([
+####    21, # "example_00001"
+####    39, # "example_00002"
+####    17, # "example_00003"
+####    17, # "example_00004"
+####    17, # "example_00005"
+####    39, # "example_00006"
+####    39, # "example_00007"
+####    40, # "example_00008"
+####    40, # "example_00009"
+####    34, # "example_00010"
+####    28, # "example_00011"
+####    39, # "example_00012"
+####    0, # "example_00013"
+####    17, # "example_00014"
+####    38, # "example_00015"
+####    13, # "example_00016"
+####    40, # "example_00017"
+####    13, # "example_00018"
+####    38, # "example_00019"
+####    38, # "example_00020"
+####    11, # "example_00021"
+####    0, # "example_00022"
+####    28, # "example_00023"
+####    0, # "example_00024"
+####    99, # "example_00025"
+####    99, # "example_00026"
+####    99, # "example_00027"
+####    32, # "example_00028"
+####    40, # "example_00029"
+####    28, # "example_00030"
+####    40, # "example_00031"
+####    40, # "example_00032"
+####    28, # "example_00033"
+####    24, # "example_00034"
+####    0, # "example_00035"
+####    0, # "example_00036"
+####    0, # "example_00037"
+####    0 # "example_00038"
+####])
+####
+##### Preprocess and get predictions based on the current model
+####X_custom, _ = preprocess_dataset(X_custom)
+####predictions = get_top_k_predictions(parameters, X_custom)
+####
+####
+##### For every example plot original image, preprocessed image, and model predictions.
+####for i in range(38):
+####    print("Actual class: ", signnames[y_custom[i]] if y_custom[i] != 99 else "None")
+####    plot_image_statistics(predictions, i)
+####    print("---------------------------------------------------------------------------------------------------\n")
+####
+####
+####X_custom = X_custom[y_custom < 99]
+####y_custom = y_custom[y_custom < 99]
+####y_custom = np.eye(43)[y_custom]
+####
+####predictions = get_predictions(parameters, X_custom)[1][:, 0]
+####accuracy = 100.0 * np.sum(predictions == np.argmax(y_custom, 1)) / predictions.shape[0]
+####print("Accuracy on captured images: %.2f%%" % (accuracy)) 
+####
